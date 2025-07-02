@@ -1,0 +1,16 @@
+# requirements.txt
+streamlit
+numpy
+pandas
+plotly
+matplotlib
+scikit-learn
+ray[rllib]
+gym
+deap
+paho-mqtt
+jsonschema
+aiohttp
+websockets
+jupyter-dash
+
