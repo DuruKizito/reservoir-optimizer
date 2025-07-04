@@ -1,5 +1,4 @@
 # dashboard.py
-# dashboard.py
 # A Streamlit dashboard for real-time reservoir optimization using ML and RL
 # This dashboard allows users to upload production and reservoir data, visualize sensor feeds,
 # make predictions using machine learning, and train a reinforcement learning agent for optimal control.
@@ -25,6 +24,8 @@ import numpy as np
 import pandas as pd
 import os
 import logging
+
+WELL_SAVE_PATH = "data/last_uploaded_wells.csv"
 
 st.set_page_config(page_title="Real-Time Reservoir Optimization", layout="wide")
 
@@ -124,7 +125,7 @@ with tabs[4]:
 
 # --- Upload well file ---
 st.sidebar.header("🛢️ Well Overlay Options")
-show_wells = st.sidebar.checkbox("Show Wells on Contours", value=True)
+show_wells = st.sidebar.checkbox("Show Wells on Contours", value=True, key="show_wells_main")
 uploaded_well_file = st.sidebar.file_uploader("Upload Well Coordinates (.csv)", type=["csv"])
 
 # --- Parse wells ---
@@ -140,32 +141,6 @@ if uploaded_well_file:
             st.sidebar.error("CSV must include: well_name, x, y")
     except Exception as e:
         st.sidebar.error(f"Error reading file: {e}")
-
-# --- Display predictions (with toggle) ---
-if st.button("📈 Show Predictions"):
-    # Use ml_model and previously loaded data
-    if 'resv_data' in locals():
-        grid = {"cartDims": [10, 10, 10]}
-        rock = resv_data.get('rock')
-        fluid = resv_data.get('fluid')
-        pressure_pred, saturation_pred = ml_model.predict(grid, rock, fluid, {})
-        # ...
-    else:
-        st.warning("Upload rock/fluid property file first.")
-
-    if show_wells and well_coords:
-        plot_pressure_contour(pressure_pred, well_coords=well_coords)
-        plot_saturation_contour(saturation_pred, well_coords=well_coords)
-    else:
-        plot_pressure_contour(pressure_pred)
-        plot_saturation_contour(saturation_pred)
-
-
-WELL_SAVE_PATH = "data/last_uploaded_wells.csv"
-
-# ---- Well Upload Sidebar ----
-st.sidebar.header("🛢️ Well Overlay Options")
-show_wells = st.sidebar.checkbox("Show Wells on Contours", value=True)
 
 # ---- Download Template CSV ----
 sample_df = pd.DataFrame({
@@ -215,12 +190,39 @@ if show_wells:
 else:
     st.info("ℹ Well overlay is disabled.")
 
-if show_wells and well_coords:
-    plot_pressure_contour(pressure_pred, well_coords=well_coords)
-    plot_saturation_contour(saturation_pred, well_coords=well_coords)
+# --- Display predictions (with toggle) ---
+pressure_pred = None
+saturation_pred = None
+if st.button("📈 Show Predictions"):
+    # Use ml_model and previously loaded data
+    if 'resv_data' in locals():
+        grid = {"cartDims": [10, 10, 10]}
+        rock = resv_data.get('rock')
+        fluid = resv_data.get('fluid')
+        pressure_pred, saturation_pred = ml_model.predict(grid, rock, fluid, {})
+        # ...
+    else:
+        st.warning("Upload rock/fluid property file first.")
+
+    if show_wells and well_coords and pressure_pred is not None:
+        plot_pressure_contour(pressure_pred, well_coords=well_coords)
+        plot_saturation_contour(saturation_pred, well_coords=well_coords)
+    elif pressure_pred is not None:
+        plot_pressure_contour(pressure_pred)
+        plot_saturation_contour(saturation_pred)
+    else:
+        st.info("No predictions to display yet. Run a prediction first.")
+
+# Only plot if pressure_pred is defined
+if pressure_pred is not None:
+    if show_wells and well_coords:
+        plot_pressure_contour(pressure_pred, well_coords=well_coords)
+        plot_saturation_contour(saturation_pred, well_coords=well_coords)
+    else:
+        plot_pressure_contour(pressure_pred)
+        plot_saturation_contour(saturation_pred)
 else:
-    plot_pressure_contour(pressure_pred)
-    plot_saturation_contour(saturation_pred)
+    st.info("No predictions to display yet. Run a prediction first.")
 
 with st.expander("🩺 Logs / Monitoring"):
     st.code(open("logs/training.log").read() if os.path.exists("logs/training.log") else "No logs yet.")
