@@ -1,6 +1,10 @@
 # dashboard.py
 # dashboard.py
+# A Streamlit dashboard for real-time reservoir optimization using ML and RL
+# This dashboard allows users to upload production and reservoir data, visualize sensor feeds,
+# make predictions using machine learning, and train a reinforcement learning agent for optimal control.
 
+print("Dashboard started")
 import streamlit as st
 from models.bhp_estimator import BHP_Estimator
 from models.rl_agent import RLAgent
@@ -139,7 +143,15 @@ if uploaded_well_file:
 
 # --- Display predictions (with toggle) ---
 if st.button("📈 Show Predictions"):
-    pressure_pred, saturation_pred = model.predict(grid, rock, fluid, {})
+    # Use ml_model and previously loaded data
+    if 'resv_data' in locals():
+        grid = {"cartDims": [10, 10, 10]}
+        rock = resv_data.get('rock')
+        fluid = resv_data.get('fluid')
+        pressure_pred, saturation_pred = ml_model.predict(grid, rock, fluid, {})
+        # ...
+    else:
+        st.warning("Upload rock/fluid property file first.")
 
     if show_wells and well_coords:
         plot_pressure_contour(pressure_pred, well_coords=well_coords)
@@ -216,4 +228,8 @@ with st.expander("🩺 Logs / Monitoring"):
 
 logging.basicConfig(filename='logs/training.log', level=logging.INFO)
 
-logging.info(f"Episode {episode} | Reward: {reward}")
+# Make sure episode and reward are defined in your RL training loop before logging
+# Example:
+# for episode in range(num_episodes):
+#     reward = ... # get reward from training
+#     logging.info(f"Episode {episode} | Reward: {reward}")

@@ -5,7 +5,7 @@ pandas
 plotly
 matplotlib
 scikit-learn
-ray[rllib]
+stable-baselines3[extra]
 gym
 deap
 paho-mqtt
@@ -13,4 +13,5 @@ jsonschema
 aiohttp
 websockets
 jupyter-dash
+shimmy>=2.0
 

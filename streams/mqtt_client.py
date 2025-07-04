@@ -44,5 +44,8 @@ class MQTTSensorClient:
         if not os.path.exists(LIVE_FEED_FILE):
             return {}
         with open(LIVE_FEED_FILE, 'r') as f:
-            return json.load(f)
+            content = f.read().strip()
+            if not content:
+                return {}
+            return json.loads(content)
 

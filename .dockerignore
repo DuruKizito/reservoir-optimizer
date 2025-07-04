@@ -1,0 +1,16 @@
+.git
+.conda
+venv
+venv39
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+*.db
+*.sqlite3
+*.log
+*.egg-info
+.idea
+.vscode
+logs
