@@ -24,13 +24,77 @@ import numpy as np
 import pandas as pd
 import os
 import logging
+import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit
 
 WELL_SAVE_PATH = "data/last_uploaded_wells.csv"
 
 st.set_page_config(page_title="Real-Time Reservoir Optimization", layout="wide")
 
-st.title("🔄 Real-Time Reservoir Optimization Dashboard")
-tabs = st.tabs(["📁 Upload & Parse", "📈 Live Sensor Feed", "🧠 ML Prediction", "🤖 RL Training", "📊 Visualization"])
+st.title("\U0001F501 Real-Time Reservoir Optimization Dashboard")
+
+# --- Upload well file and production data per well (move above tabs) ---
+st.sidebar.header("\U0001F6E2️ Well Overlay Options")
+show_wells = st.sidebar.checkbox("Show Wells on Contours", value=True, key="show_wells_main")
+uploaded_well_file = st.sidebar.file_uploader("Upload Well Coordinates (.csv)", type=["csv"], key="well_coords_uploader")
+
+well_coords = []
+well_names = []
+if uploaded_well_file:
+    try:
+        df_wells = pd.read_csv(uploaded_well_file)
+        required_columns = {'well_name', 'x', 'y'}
+        if required_columns.issubset(set(df_wells.columns)):
+            well_coords = df_wells.to_dict(orient='records')
+            well_names = list(df_wells['well_name'])
+            st.sidebar.success(f"{len(well_coords)} wells loaded")
+            os.makedirs("data", exist_ok=True)
+            df_wells.to_csv(WELL_SAVE_PATH, index=False)
+            st.sidebar.info(f"Auto-saved to: {WELL_SAVE_PATH}")
+        else:
+            st.sidebar.error("CSV must include: well_name, x, y")
+    except Exception as e:
+        st.sidebar.error(f"Error reading file: {e}")
+elif os.path.exists(WELL_SAVE_PATH):
+    df_wells = pd.read_csv(WELL_SAVE_PATH)
+    well_coords = df_wells.to_dict(orient='records')
+    well_names = list(df_wells['well_name'])
+    st.sidebar.info("Using last uploaded wells from saved file.")
+
+# ---- Download Template CSV ----
+sample_df = pd.DataFrame({
+    'well_name': ['Well-A', 'Well-B'],
+    'x': [5, 10],
+    'y': [7, 3]
+})
+csv_bytes = sample_df.to_csv(index=False).encode()
+st.sidebar.download_button(
+    label="\U0001F4E5 Download Well Template",
+    data=csv_bytes,
+    file_name="well_template.csv",
+    mime='text/csv'
+)
+
+# --- Upload production data per well ---
+st.sidebar.header("\U0001F4C8 Production Data Per Well")
+if 'prod_data_per_well' not in st.session_state:
+    st.session_state['prod_data_per_well'] = {}
+for well in well_names:
+    prod_file = st.sidebar.file_uploader(f"Upload Production Data for {well}", type=["csv"], key=f"prod_{well}")
+    if prod_file:
+        try:
+            df_prod = pd.read_csv(prod_file)
+            required_prod_cols = {'well_name', 'time', 'rate', 'BHP pressure', 'THP Pressure'}
+            if required_prod_cols.issubset(set(df_prod.columns)):
+                st.session_state['prod_data_per_well'][well] = df_prod
+                st.sidebar.success(f"Production data loaded for {well}")
+            else:
+                st.sidebar.error(f"{well}: CSV must include: {', '.join(required_prod_cols)}")
+        except Exception as e:
+            st.sidebar.error(f"{well}: Error reading file: {e}")
+prod_data_per_well = st.session_state['prod_data_per_well']
+
+tabs = st.tabs(["\U0001F4C1 Upload & Parse", "\U0001F4C8 Live Sensor Feed", "\U0001F9E0 ML Prediction", "\U0001F916 RL Training", "\U0001F4CA Visualization"])
 
 # Shared instances
 rl_agent = RLAgent()
@@ -73,7 +137,7 @@ with tabs[1]:
 
 # --- 🧠 ML Prediction ---
 with tabs[2]:
-    st.header("🧠 Predict Pressure & Saturation (ML)")
+    st.header("🧠 Predict Pressure, Saturation & Production Rate (ML)")
     if resv_file:
         st.write("📌 Using uploaded rock/fluid data.")
         pressure_pred, sat_pred = ml_model.predict(
@@ -85,6 +149,36 @@ with tabs[2]:
         st.success("Prediction Complete!")
         plot_pressure_contour(pressure_pred)
         plot_saturation_contour(sat_pred)
+        # --- ML Production Prediction per well ---
+        st.subheader("Predicted Production Rate per Well")
+        for well, df_prod in prod_data_per_well.items():
+            # Dummy prediction: use rate column as-is, replace with ML model output as needed
+            st.write(f"**{well}**")
+            st.line_chart(df_prod[['time', 'rate']].set_index('time'))
+            # Decline curve (simple exponential fit as placeholder)
+            if len(df_prod) > 1:
+                def decline_curve(t, qi, D):
+                    return qi * np.exp(-D * t)
+                try:
+                    popt, _ = curve_fit(decline_curve, df_prod['time'], df_prod['rate'], maxfev=10000)
+                    t_fit = np.linspace(df_prod['time'].min(), df_prod['time'].max(), 100)
+                    rate_fit = decline_curve(t_fit, *popt)
+                    fig, ax = plt.subplots()
+                    ax.plot(df_prod['time'], df_prod['rate'], 'o', label='Actual')
+                    ax.plot(t_fit, rate_fit, '-', label='Decline Curve')
+                    ax.set_xlabel('Time (days)')
+                    ax.set_ylabel('Rate (STB/day)')
+                    ax.set_title(f'Decline Curve - {well}')
+                    ax.legend()
+                    st.pyplot(fig)
+                except Exception as e:
+                    st.warning(f"Decline curve fit failed for {well}: {e}")
+        # --- Overall reservoir production (sum of all wells) ---
+        if prod_data_per_well:
+            st.subheader("Overall Reservoir Production Rate")
+            all_prod = pd.concat(prod_data_per_well.values())
+            all_prod_grouped = all_prod.groupby('time')['rate'].sum().reset_index()
+            st.line_chart(all_prod_grouped.set_index('time'))
     else:
         st.warning("Upload rock/fluid property file first.")
 
@@ -123,73 +217,6 @@ with tabs[4]:
     else:
         st.info("Upload data to view results.")
 
-# --- Upload well file ---
-st.sidebar.header("🛢️ Well Overlay Options")
-show_wells = st.sidebar.checkbox("Show Wells on Contours", value=True, key="show_wells_main")
-uploaded_well_file = st.sidebar.file_uploader("Upload Well Coordinates (.csv)", type=["csv"])
-
-# --- Parse wells ---
-well_coords = []
-if uploaded_well_file:
-    try:
-        df_wells = pd.read_csv(uploaded_well_file)
-        required_columns = {'well_name', 'x', 'y'}
-        if required_columns.issubset(set(df_wells.columns)):
-            well_coords = df_wells.to_dict(orient='records')
-            st.sidebar.success(f"{len(well_coords)} wells loaded")
-        else:
-            st.sidebar.error("CSV must include: well_name, x, y")
-    except Exception as e:
-        st.sidebar.error(f"Error reading file: {e}")
-
-# ---- Download Template CSV ----
-sample_df = pd.DataFrame({
-    'well_name': ['Well-A', 'Well-B'],
-    'x': [5, 10],
-    'y': [7, 3]
-})
-csv_bytes = sample_df.to_csv(index=False).encode()
-st.sidebar.download_button(
-    label="📥 Download Well Template",
-    data=csv_bytes,
-    file_name="well_template.csv",
-    mime='text/csv'
-)
-
-# ---- Upload Well Coordinates ----
-uploaded_well_file = st.sidebar.file_uploader("Upload Well Coordinates (.csv)", type=["csv"])
-
-well_coords = []
-if uploaded_well_file:
-    try:
-        df_wells = pd.read_csv(uploaded_well_file)
-        required_columns = {'well_name', 'x', 'y'}
-        if required_columns.issubset(df_wells.columns):
-            well_coords = df_wells.to_dict(orient='records')
-            st.sidebar.success(f"{len(well_coords)} wells loaded")
-
-            # Save to /data/
-            os.makedirs("data", exist_ok=True)
-            df_wells.to_csv(WELL_SAVE_PATH, index=False)
-            st.sidebar.info(f"Auto-saved to: {WELL_SAVE_PATH}")
-        else:
-            st.sidebar.error("CSV must contain columns: well_name, x, y")
-    except Exception as e:
-        st.sidebar.error(f"Error reading file: {e}")
-elif os.path.exists(WELL_SAVE_PATH):
-    df_wells = pd.read_csv(WELL_SAVE_PATH)
-    well_coords = df_wells.to_dict(orient='records')
-    st.sidebar.info("Using last uploaded wells from saved file.")
-
-# === Notifications ===
-if show_wells:
-    if well_coords:
-        st.success(f"✅ {len(well_coords)} wells loaded and overlaid.")
-    else:
-        st.warning("⚠ 'Show Wells' is enabled, but no well data was loaded.")
-else:
-    st.info("ℹ Well overlay is disabled.")
-
 # --- Display predictions (with toggle) ---
 pressure_pred = None
 saturation_pred = None
@@ -227,7 +254,8 @@ else:
 with st.expander("🩺 Logs / Monitoring"):
     st.code(open("logs/training.log").read() if os.path.exists("logs/training.log") else "No logs yet.")
 
-
+# Ensure logs directory exists before configuring logging
+os.makedirs("logs", exist_ok=True)
 logging.basicConfig(filename='logs/training.log', level=logging.INFO)
 
 # Make sure episode and reward are defined in your RL training loop before logging

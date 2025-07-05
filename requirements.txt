@@ -14,4 +14,4 @@ aiohttp
 websockets
 jupyter-dash
 shimmy>=2.0
-
+scipy

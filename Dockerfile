@@ -26,6 +26,7 @@ RUN set -eux; \
 # Copy requirements and install Python dependencies
 COPY requirements.txt ./
 RUN pip install --upgrade pip setuptools wheel \
+    && pip install torch==2.3.0+cpu torchvision==0.18.0+cpu torchaudio==2.3.0+cpu --index-url https://download.pytorch.org/whl/cpu \
     && pip install stable-baselines3[extra] streamlit \
     && pip install -r requirements.txt
 
