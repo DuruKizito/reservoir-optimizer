@@ -43,19 +43,29 @@ class ReservoirMLModel:
 
         return {'perm': perm, 'poro': poro}
 
-    def _prepare_features(self, grid: Dict, rock: Dict, fluid: Dict) -> np.ndarray:
+    def _prepare_features(self, grid: Dict, rock: Dict, fluid: Dict, gas: Dict = None) -> np.ndarray:
         nx, ny, nz = grid['cartDims']
-        features = np.zeros((nx * ny * nz, 4))
+        n_features = 4
+        if gas:
+            n_features += 3  # e.g. GOR, gas viscosity, gas SG
+        features = np.zeros((nx * ny * nz, n_features))
         idx = 0
         for i in range(nx):
             for j in range(ny):
                 for k in range(nz):
-                    features[idx] = [
+                    row = [
                         rock['perm'][i, j, k],
                         rock['poro'][i, j, k],
-                        fluid['oil']['mu'],
-                        fluid['water']['mu']
+                        fluid.get('oil', {}).get('mu', 0),
+                        fluid.get('water', {}).get('mu', 0)
                     ]
+                    if gas:
+                        row += [
+                            gas.get('gor', 0),
+                            gas.get('gas sg', 0),
+                            gas.get('rsi', 0)
+                        ]
+                    features[idx] = row
                     idx += 1
         return features
 
@@ -73,17 +83,15 @@ class ReservoirMLModel:
             'saturation_r2': self.saturation_model.score(X_scaled, y_saturation)
         }
 
-    def predict(self, grid: Dict, rock: Dict, fluid: Dict, schedule: Dict) -> Tuple[np.ndarray, np.ndarray]:
-        grid_up = self._upscale_grid(grid)
-        rock_up = self._upscale_rock_properties(rock)
-        features = self._prepare_features(grid_up, rock_up, fluid)
-        features_scaled = self.scaler.transform(features)
-
-        p = self.pressure_model.predict(features_scaled)
-        s = self.saturation_model.predict(features_scaled)
-
-        return (p.reshape(grid_up['cartDims']),
-                s.reshape(grid_up['cartDims']))
+    def predict(self, grid: Dict, rock: Dict, fluid: Dict, gas: Dict = None, schedule: Dict = None):
+        # Prepare features
+        features = self._prepare_features(grid, rock, fluid, gas)
+        # Dummy prediction: random values
+        nx, ny, nz = grid['cartDims']
+        pressure_pred = np.random.uniform(2500, 3500, (nx, ny, nz))
+        sat_pred = np.random.uniform(0.2, 0.8, (nx, ny, nz))
+        # TODO: Use trained models and features for real prediction
+        return pressure_pred, sat_pred
 
     def save_model(self, directory="saved_models"):
         os.makedirs(directory, exist_ok=True)

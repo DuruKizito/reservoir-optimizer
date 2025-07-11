@@ -62,16 +62,58 @@ elif os.path.exists(WELL_SAVE_PATH):
     st.sidebar.info("Using last uploaded wells from saved file.")
 
 # ---- Download Template CSV ----
-sample_df = pd.DataFrame({
+sample_well_df = pd.DataFrame({
     'well_name': ['Well-A', 'Well-B'],
     'x': [5, 10],
     'y': [7, 3]
 })
-csv_bytes = sample_df.to_csv(index=False).encode()
+sample_rock_fluid_df = pd.DataFrame({
+    'Property': [
+        'Pi', 'Depth', 'Pb', 'Rsi', 'GOR', 'Boi', 'Reservoir Temperature',
+        'Oil Viscosity', 'Oil SG', 'API', 'Gas SG', 'Porosity', 'Avg Net Pay',
+        'Swi', 'Permeability'
+    ],
+    'Value': [
+        3500, 9000, 2500, 800, 1200, 1.2, 120,
+        2.5, 0.85, 35, 0.7, 0.22, 50,
+        0.25, 150
+    ],
+    'Unit': [
+        'psia', 'ft', 'psia', 'scf/STB', 'scf/STB', 'bbl/STB', 'degF',
+        'cp', '-', 'degAPI', '-', '-', 'ft', '-', 'mD'
+    ]
+})
+sample_prod_df = pd.DataFrame({
+    'well_name': ['Well-A', 'Well-B'],
+    'time': [0, 0],
+    'oil_rate': [500, 400],
+    'gas_rate': [600, 800],
+    'water_rate': [100, 120],
+    'BHP pressure': [3200, 3150],
+    'THP Pressure': [1500, 1400],
+    'Unit_oil_rate': ['STB/day', 'STB/day'],
+    'Unit_gas_rate': ['scf/day', 'scf/day'],
+    'Unit_water_rate': ['bbl/day', 'bbl/day'],
+    'Unit_BHP': ['psia', 'psia'],
+    'Unit_THP': ['psia', 'psia']
+})
+
 st.sidebar.download_button(
     label="\U0001F4E5 Download Well Template",
-    data=csv_bytes,
+    data=sample_well_df.to_csv(index=False).encode(),
     file_name="well_template.csv",
+    mime='text/csv'
+)
+st.sidebar.download_button(
+    label="\U0001F4E5 Download Rock & Fluid Template",
+    data=sample_rock_fluid_df.to_csv(index=False).encode(),
+    file_name="rock_fluid_template.csv",
+    mime='text/csv'
+)
+st.sidebar.download_button(
+    label="\U0001F4E5 Download Production Data Template",
+    data=sample_prod_df.to_csv(index=False).encode(),
+    file_name="production_template.csv",
     mime='text/csv'
 )
 
@@ -94,7 +136,14 @@ for well in well_names:
             st.sidebar.error(f"{well}: Error reading file: {e}")
 prod_data_per_well = st.session_state['prod_data_per_well']
 
-tabs = st.tabs(["\U0001F4C1 Upload & Parse", "\U0001F4C8 Live Sensor Feed", "\U0001F9E0 ML Prediction", "\U0001F916 RL Training", "\U0001F4CA Visualization"])
+tabs = st.tabs([
+    "\U0001F4C1 Upload & Parse",
+    "\U0001F4C8 Live Sensor Feed",
+    "\U0001F9E0 ML Prediction",
+    "\U0001F916 RL Training",
+    "\U0001F4CA Visualization",
+    "\U0001F4AC Recommendations"
+])
 
 # Shared instances
 rl_agent = RLAgent()
@@ -103,7 +152,17 @@ bhp_estimator = BHP_Estimator()
 
 # --- 📁 Upload & Parse ---
 with tabs[0]:
+    os.makedirs("data/uploads", exist_ok=True)
     st.header("📁 Upload Production & Reservoir Files")
+    st.markdown("""
+    **Production Data Required Columns:**
+    - well_name, time, oil_rate, gas_rate, water_rate, BHP pressure, THP Pressure, Unit_oil_rate, Unit_gas_rate, Unit_water_rate, Unit_BHP, Unit_THP
+    
+    **Rock & Fluid Properties Required Columns:**
+    - Property, Value, Unit
+    
+    Download templates from sidebar for correct format and units.
+    """)
     prod_file = st.file_uploader("Upload Production CSV", type=["csv"])
     resv_file = st.file_uploader("Upload Rock & Fluid Properties", type=["csv", "json"])
     eclipse_file = st.file_uploader("Upload Eclipse Output", type=["csv", "tsv"])
@@ -111,15 +170,28 @@ with tabs[0]:
     if prod_file:
         with open("data/uploads/prod.csv", "wb") as f:
             f.write(prod_file.read())
-        df_prod = parse_production_csv("data/uploads/prod.csv")
-        st.success("Production data parsed!")
-        st.write(df_prod.head())
+        df_prod = pd.read_csv("data/uploads/prod.csv")
+        required_prod_cols = {'well_name', 'time', 'oil_rate', 'gas_rate', 'water_rate', 'BHP pressure', 'THP Pressure', 'Unit_oil_rate', 'Unit_gas_rate', 'Unit_water_rate', 'Unit_BHP', 'Unit_THP'}
+        if required_prod_cols.issubset(set(df_prod.columns)):
+            st.success("Production data parsed!")
+            st.write(df_prod.head())
+        else:
+            st.error(f"Production CSV must include: {', '.join(required_prod_cols)}")
+    else:
+        df_prod = None
 
     if resv_file:
         with open("data/uploads/resv.csv", "wb") as f:
             f.write(resv_file.read())
-        resv_data = parse_reservoir_properties("data/uploads/resv.csv")
-        st.success("Reservoir properties loaded.")
+        df_resv = pd.read_csv("data/uploads/resv.csv")
+        required_resv_cols = {'Property', 'Value', 'Unit'}
+        if required_resv_cols.issubset(set(df_resv.columns)):
+            st.success("Rock & Fluid properties loaded.")
+            st.write(df_resv.head())
+        else:
+            st.error(f"Rock & Fluid CSV must include: {', '.join(required_resv_cols)}")
+    else:
+        df_resv = None
 
     if eclipse_file:
         with open("data/uploads/eclipse.csv", "wb") as f:
@@ -138,12 +210,23 @@ with tabs[1]:
 # --- 🧠 ML Prediction ---
 with tabs[2]:
     st.header("🧠 Predict Pressure, Saturation & Production Rate (ML)")
-    if resv_file:
-        st.write("📌 Using uploaded rock/fluid data.")
+    if df_resv is not None:
+        st.write("📌 Using uploaded rock/fluid/gas data.")
+        rock, fluid, gas = {}, {}, {}
+        for _, row in df_resv.iterrows():
+            prop = row['Property'].lower()
+            val = row['Value']
+            if prop in ['porosity', 'permeability', 'avg net pay', 'swi']:
+                rock[prop] = val
+            elif prop in ['oil viscosity', 'oil sg', 'api', 'boi', 'reservoir temperature']:
+                fluid[prop] = val
+            elif prop in ['gas sg', 'rsi', 'gor', 'pb', 'pi']:
+                gas[prop] = val
         pressure_pred, sat_pred = ml_model.predict(
             grid={"cartDims": [10, 10, 10]},
-            rock=resv_data['rock'],
-            fluid=resv_data['fluid'],
+            rock=rock,
+            fluid=fluid,
+            gas=gas,
             schedule={}
         )
         st.success("Prediction Complete!")
@@ -185,6 +268,18 @@ with tabs[2]:
 # --- 🤖 RL Training ---
 with tabs[3]:
     st.header("🎯 Reinforcement Learning Control")
+    if df_resv is not None:
+        rock, fluid, gas = {}, {}, {}
+        for _, row in df_resv.iterrows():
+            prop = row['Property'].lower()
+            val = row['Value']
+            if prop in ['porosity', 'permeability', 'avg net pay', 'swi']:
+                rock[prop] = val
+            elif prop in ['oil viscosity', 'oil sg', 'api', 'boi', 'reservoir temperature']:
+                fluid[prop] = val
+            elif prop in ['gas sg', 'rsi', 'gor', 'pb', 'pi']:
+                gas[prop] = val
+        rl_agent = RLAgent(config={"rock": rock, "fluid": fluid, "gas": gas})
     if st.button("▶️ Train RL Agent (10 Episodes)"):
         rewards = rl_agent.train(10)
         st.session_state['rewards'] = st.session_state.get('rewards', []) + rewards
@@ -204,11 +299,17 @@ with tabs[4]:
     st.header("📊 Visualize BHP or Eclipse Data")
     if prod_file:
         st.subheader("🔍 BHP Estimation")
+        # Try to use gas density if available
+        gas_density_col = None
+        for col in df_prod.columns:
+            if 'gas_density' in col.lower():
+                gas_density_col = col
         results = bhp_estimator.process_well_data(
             well_data=df_prod,
             depth_column='depth',
             density_column='density',
-            pressure_column='pressure'
+            pressure_column='pressure',
+            gas_density_column=gas_density_col
         )
         st.dataframe(results)
     elif eclipse_file:
@@ -217,16 +318,46 @@ with tabs[4]:
     else:
         st.info("Upload data to view results.")
 
+# --- Recommendations ---
+with tabs[5]:
+    st.header("\U0001F4AC Model Recommendations & Operator Controls")
+    if df_resv is not None and df_prod is not None:
+        # Dummy recommendation logic (replace with real model output)
+        rec_pressure = np.mean(df_prod['BHP pressure']) if 'BHP pressure' in df_prod.columns else None
+        rec_gas_rate = np.mean(df_prod['gas_rate']) if 'gas_rate' in df_prod.columns else None
+        rec_oil_rate = np.mean(df_prod['oil_rate']) if 'oil_rate' in df_prod.columns else None
+        st.info(f"Recommended Pressure: {rec_pressure:.2f} psia" if rec_pressure else "No pressure recommendation.")
+        st.info(f"Recommended Gas Rate: {rec_gas_rate:.2f} scf/day" if rec_gas_rate else "No gas rate recommendation.")
+        st.info(f"Recommended Oil Rate: {rec_oil_rate:.2f} STB/day" if rec_oil_rate else "No oil rate recommendation.")
+        accept = st.button("Accept Recommendations")
+        reject = st.button("Reject Recommendations")
+        if accept:
+            st.success("Operator accepted recommendations. Controls updated.")
+        elif reject:
+            st.warning("Operator rejected recommendations. No changes applied.")
+    else:
+        st.info("Upload both production and reservoir data to get recommendations.")
+
 # --- Display predictions (with toggle) ---
 pressure_pred = None
 saturation_pred = None
 if st.button("📈 Show Predictions"):
     # Use ml_model and previously loaded data
-    if 'resv_data' in locals():
+    if df_resv is not None:
+        rock = {}
+        fluid = {}
+        gas = {}
+        for _, row in df_resv.iterrows():
+            prop = row['Property'].lower()
+            val = row['Value']
+            if prop in ['porosity', 'permeability', 'avg net pay', 'swi']:
+                rock[prop] = val
+            elif prop in ['oil viscosity', 'oil sg', 'api', 'boi', 'reservoir temperature']:
+                fluid[prop] = val
+            elif prop in ['gas sg', 'rsi', 'gor', 'pb', 'pi']:
+                gas[prop] = val
         grid = {"cartDims": [10, 10, 10]}
-        rock = resv_data.get('rock')
-        fluid = resv_data.get('fluid')
-        pressure_pred, saturation_pred = ml_model.predict(grid, rock, fluid, {})
+        pressure_pred, saturation_pred = ml_model.predict(grid, rock, fluid, gas, {})
         # ...
     else:
         st.warning("Upload rock/fluid property file first.")

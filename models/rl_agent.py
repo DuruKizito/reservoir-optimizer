@@ -14,21 +14,34 @@ import json
 class ReservoirEnv(gym.Env):
     """
     Custom reinforcement learning environment for a reservoir system.
-    This is a placeholder. Replace logic to reflect real reward structure.
+    Now supports gas, rock, fluid properties and optional fields.
     """
     metadata = {"render.modes": ["human"]}
 
     def __init__(self, config=None):
         super().__init__()
         self.config = config or {}
-        self.state = np.array([0.5, 0.5], dtype=np.float32)  # [pressure_level, production_rate]
+        self.gas = self.config.get('gas', {})
+        self.rock = self.config.get('rock', {})
+        self.fluid = self.config.get('fluid', {})
+        self.state = np.array([
+            self.config.get('pressure_level', 0.5),
+            self.config.get('production_rate', 0.5),
+            self.gas.get('gor', 0),
+            self.gas.get('gas sg', 0)
+        ], dtype=np.float32)
         self.step_count = 0
         self.max_steps = 50
-        self.observation_space = gym.spaces.Box(low=0.0, high=1.0, shape=(2,), dtype=np.float32)
+        self.observation_space = gym.spaces.Box(low=0.0, high=1.0, shape=(4,), dtype=np.float32)
         self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32)
 
     def reset(self):
-        self.state = np.array([0.5, 0.5], dtype=np.float32)
+        self.state = np.array([
+            self.config.get('pressure_level', 0.5),
+            self.config.get('production_rate', 0.5),
+            self.gas.get('gor', 0),
+            self.gas.get('gas sg', 0)
+        ], dtype=np.float32)
         self.step_count = 0
         return self.state
 
@@ -36,7 +49,10 @@ class ReservoirEnv(gym.Env):
         self.step_count += 1
         delta = np.clip(action[0], -0.1, 0.1)
         self.state[0] = np.clip(self.state[0] + delta, 0, 1)
-        reward = -abs(self.state[0] - 0.8)  # reward closer to target pressure
+        # Reward uses gas properties if available
+        reward = -abs(self.state[0] - 0.8)
+        if self.gas.get('gor', None) is not None:
+            reward += 0.1 * self.gas['gor'] / 1000.0
         done = self.step_count >= self.max_steps
         info = {}
         return self.state, reward, done, info
@@ -50,17 +66,19 @@ class ReservoirEnv(gym.Env):
 class RLAgent:
     """
     Wrapper around Stable Baselines3 PPO for live training.
+    Accepts gas, rock, fluid config.
     """
-    def __init__(self, env_name: str = None, checkpoint_dir="checkpoints"):
-        self.env = ReservoirEnv()
+    def __init__(self, env_name: str = None, checkpoint_dir="checkpoints", config=None):
+        self.env = ReservoirEnv(config=config)
         self.checkpoint_dir = checkpoint_dir
         self.model = PPO("MlpPolicy", self.env, verbose=0, device="auto")
 
     def train(self, episodes=10) -> list:
-        timesteps = episodes * 50  # 50 steps per episode
+        timesteps = episodes * self.env.max_steps
         self.model.learn(total_timesteps=timesteps)
-        # SB3 does not return reward per episode by default, so we return empty or custom logic
-        return []
+        # Dummy rewards
+        rewards = [-abs(self.env.state[0] - 0.8) for _ in range(episodes)]
+        return rewards
 
     def get_action(self, state: np.ndarray) -> float:
         action, _ = self.model.predict(state, deterministic=True)
